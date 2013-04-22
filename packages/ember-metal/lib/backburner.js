@@ -43,15 +43,19 @@ Backburner.prototype = {
   },
 
   end: function() {
-    this.currentInstance.flush();
-    this.currentInstance = null;
-    if (this.previousInstance) {
-      this.currentInstance = this.previousInstance;
-      this.previousInstance = null;
+    try {
+      this.currentInstance.flush();
+    } finally {
+      this.currentInstance = null;
+      if (this.previousInstance) {
+        this.currentInstance = this.previousInstance;
+        this.previousInstance = null;
+      }      
     }
   },
 
   run: function(target, method /*, args */) {
+    var ret;
     this.begin();
 
     if (!method) {
@@ -59,9 +63,19 @@ Backburner.prototype = {
       target = null;
     }
 
+    if (typeof method === 'string') {
+      method = target[method];
+    }
+
     var args = arguments.length > 2 ? slice.call(arguments, 2) : undefined;
-    method.apply(target, args);
-    this.end();
+    try {
+      ret = method.apply(target, args);
+    } catch(e) {
+      throw e;
+    } finally {
+      this.end();
+    }
+    return ret;
   },
 
   schedule: function(queueName, target, method /* , args */) {
@@ -109,9 +123,7 @@ Backburner.prototype = {
       if (debouncee[0] === target && debouncee[1] === method) { return; } // do nothing
     }
 
-    debouncees.push([target, method]);
-
-    setTimeout(function() {
+    var timer = setTimeout(function() {
       self.run.apply(self, args);
 
       // remove debouncee
@@ -126,6 +138,16 @@ Backburner.prototype = {
 
       if (index > -1) { debouncees.splice(index, 1); }
     }, wait);
+
+    debouncees.push([target, method, timer]);
+  },
+
+  cancelTimers: function() {
+    for (var i = 0, l = debouncees.length; i < l; i++) {
+      clearTimeout(debouncees[i][2]);
+    }
+
+    debouncees = [];
   }
 };
 
@@ -180,11 +202,10 @@ DeferredActionQueues.prototype = {
           method = action[1],
           args   = action[2];
 
-      try {
-        method.apply(target, args);
-      } catch(e) {
-
-      }
+      // try {
+      method.apply(target, args);
+      // } catch(e) {
+      // }
       return false;
     }
     return true;
@@ -228,7 +249,7 @@ Queue.prototype = {
     var queue = this._queue,
         action, target, method, args;
 
-    for (var i = 0, l = queue.length; i < l; i++) {
+    for (var i = 0; i < queue.length; i++) {
       action = queue[i];
       target = action[0];
       method = action[1];
